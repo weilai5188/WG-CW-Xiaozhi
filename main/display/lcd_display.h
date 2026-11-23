@@ -10,6 +10,12 @@
 
 #include <atomic>
 #include <memory>
+#include <sdkconfig.h>
+
+#if defined(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD) && \
+    defined(CONFIG_LCD_ST7789_240X240) && defined(CONFIG_USE_DEFAULT_MESSAGE_STYLE)
+#define WG_CW_BIG_FACES_ENABLED 1
+#endif
 
 #define PREVIEW_IMAGE_DURATION_MS 5000
 
@@ -36,6 +42,16 @@ protected:
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
 
+#ifdef WG_CW_BIG_FACES_ENABLED
+    bool wg_cw_wifi_seen_ = false;
+    bool wg_cw_wifi_connected_ = false;
+    int64_t wg_cw_connected_until_us_ = 0;
+
+    // These helpers run with the display lock held.
+    const lv_image_dsc_t* GetWgCwNeutralFace() const;
+    void ShowWgCwFace(const lv_image_dsc_t* face);
+#endif
+
     void InitializeLcdThemes();
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
@@ -46,6 +62,10 @@ protected:
     
 public:
     ~LcdDisplay();
+#ifdef WG_CW_BIG_FACES_ENABLED
+    void SetStatus(const char* status) override;
+    void UpdateStatusBar(bool update_all = false) override;
+#endif
     virtual void SetEmotion(const char* emotion) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void ClearChatMessages() override;

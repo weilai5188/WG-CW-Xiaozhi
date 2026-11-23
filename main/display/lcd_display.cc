@@ -16,6 +16,11 @@
 
 #include "board.h"
 
+#ifdef WG_CW_BIG_FACES_ENABLED
+#include "application.h"
+#include "wg_cw_faces.h"
+#endif
+
 #define TAG "LcdDisplay"
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
@@ -846,6 +851,13 @@ void LcdDisplay::SetupUI() {
     lv_obj_center(emoji_image_);
     lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
 
+#ifdef WG_CW_BIG_FACES_ENABLED
+    lv_obj_set_size(emoji_box_, WgCwFaces::kFaceSize, WgCwFaces::kFaceSize);
+    lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(emoji_box_, LV_SCROLLBAR_MODE_OFF);
+    ShowWgCwFace(&WgCwFaces::idle);
+#endif
+
     /* Middle layer: preview_image_ - centered display */
     preview_image_ = lv_image_create(screen);
     lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
@@ -1071,6 +1083,85 @@ void LcdDisplay::ClearChatMessages() {
 }
 #endif
 
+#ifdef WG_CW_BIG_FACES_ENABLED
+const lv_image_dsc_t* LcdDisplay::GetWgCwNeutralFace() const {
+    switch (Application::GetInstance().GetDeviceState()) {
+        case kDeviceStateConnecting:
+            return &WgCwFaces::thinking;
+        case kDeviceStateListening:
+            return &WgCwFaces::listening;
+        case kDeviceStateSpeaking:
+            return &WgCwFaces::speaking;
+        case kDeviceStateWifiConfiguring:
+            return &WgCwFaces::disconnected;
+        default:
+            if (wg_cw_wifi_seen_ && !wg_cw_wifi_connected_) {
+                return &WgCwFaces::disconnected;
+            }
+            return esp_timer_get_time() < wg_cw_connected_until_us_
+                ? &WgCwFaces::connected : &WgCwFaces::idle;
+    }
+}
+
+void LcdDisplay::ShowWgCwFace(const lv_image_dsc_t* face) {
+    if (gif_controller_) {
+        gif_controller_->Stop();
+    }
+    if (lv_image_get_src(emoji_image_) != face) {
+        lv_image_set_src(emoji_image_, face);
+    }
+    gif_controller_.reset();
+    lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void LcdDisplay::SetStatus(const char* status) {
+    LvglDisplay::SetStatus(status);
+    // The v2.2.6 speaking state sets only the status text, unlike listening.
+    if (status != nullptr && std::strcmp(status, Lang::Strings::SPEAKING) == 0) {
+        SetEmotion("speaking");
+    }
+}
+
+void LcdDisplay::UpdateStatusBar(bool update_all) {
+    LvglDisplay::UpdateStatusBar(update_all);
+
+    DisplayLockGuard lock(this);
+    if (emoji_image_ == nullptr) {
+        return;
+    }
+
+    const auto state = Application::GetInstance().GetDeviceState();
+    const bool config_mode = state == kDeviceStateWifiConfiguring;
+    // WifiBoard shows its Wi-Fi glyph while hosting the provisioning AP.
+    // Treat that state as disconnected from the station network.
+    if (config_mode || network_icon_ != nullptr) {
+        const bool connected = !config_mode && std::strcmp(network_icon_, FONT_AWESOME_WIFI_SLASH) != 0;
+        if (!wg_cw_wifi_seen_ || connected != wg_cw_wifi_connected_) {
+            wg_cw_wifi_seen_ = true;
+            wg_cw_wifi_connected_ = connected;
+            wg_cw_connected_until_us_ = connected ? esp_timer_get_time() + 2500000 : 0;
+        }
+    }
+
+    // Refresh only the network/idle faces. Leave moods, sleep and alerts alone.
+    if (state != kDeviceStateStarting && state != kDeviceStateWifiConfiguring &&
+        state != kDeviceStateActivating && state != kDeviceStateIdle &&
+        state != kDeviceStateUnknown) {
+        return;
+    }
+    const auto* current = lv_image_get_src(emoji_image_);
+    if (!lv_obj_has_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN) &&
+        (current == &WgCwFaces::idle || current == &WgCwFaces::connected ||
+         current == &WgCwFaces::disconnected)) {
+        const auto* next = GetWgCwNeutralFace();
+        if (current != next) {
+            ShowWgCwFace(next);
+        }
+    }
+}
+#endif
+
 void LcdDisplay::SetEmotion(const char* emotion) {
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!", emotion);
@@ -1081,6 +1172,24 @@ void LcdDisplay::SetEmotion(const char* emotion) {
         }
         return;
     }
+
+#ifdef WG_CW_BIG_FACES_ENABLED
+    if (emotion != nullptr) {
+        DisplayLockGuard lock(this);
+        const auto state = Application::GetInstance().GetDeviceState();
+        const lv_image_dsc_t* face = WgCwFaces::Find(emotion);
+        if (std::strcmp(emotion, "neutral") == 0 || std::strcmp(emotion, "microchip_ai") == 0 ||
+            (state == kDeviceStateWifiConfiguring && std::strcmp(emotion, "gear") == 0)) {
+            face = GetWgCwNeutralFace();
+        }
+        if (face != nullptr) {
+            ShowWgCwFace(face);
+            return;
+        }
+    } else {
+        return;
+    }
+#endif
 
     auto emoji_collection = static_cast<LvglTheme*>(current_theme_)->emoji_collection();
     auto image = emoji_collection != nullptr ? emoji_collection->GetEmojiImage(emotion) : nullptr;
