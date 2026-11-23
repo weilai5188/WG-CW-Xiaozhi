@@ -1,0 +1,38 @@
+name: Build WG CW XiaoZhi S3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/wg-cw-gpio17
+    paths:
+      - 'main/**'
+      - 'scripts/**'
+      - 'sdkconfig.defaults*'
+      - '.github/workflows/build-wg-cw.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:release-v6.1
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Build bread-compact-wifi-lcd (ST7789 240x240)
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          idf.py --version
+          python scripts/build.py bread-compact-wifi-lcd --name bread-compact-wifi-lcd
+          test -s build/merged-binary.bin
+      - name: Publish merged flash image
+        uses: actions/upload-artifact@v4
+        with:
+          name: WG-CW-Xiaozhi-S3-GPIO17-merged
+          path: build/merged-binary.bin
+          if-no-files-found: error
+          retention-days: 14

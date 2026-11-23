@@ -15,6 +15,8 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <driver/spi_common.h>
+#include <driver/gpio.h>
+#include "cw_key_monitor.h"  // WG_CW_GPIO17_V1
 
 #if defined(LCD_TYPE_ILI9341_SERIAL)
 #include "esp_lcd_ili9341.h"
@@ -63,6 +65,8 @@ class CompactWifiBoardLCD : public WifiBoard {
 private:
  
     Button boot_button_;
+    Button volume_up_button_;
+    Button volume_down_button_;
     LcdDisplay* display_;
 
     void InitializeSpi() {
@@ -123,6 +127,16 @@ private:
     }
 
     void InitializeButtons() {
+        volume_up_button_.OnClick([this]() {
+            auto* codec = GetAudioCodec();
+            int volume = codec->output_volume() + 10;
+            codec->SetOutputVolume(volume > 100 ? 100 : volume);
+        });
+        volume_down_button_.OnClick([this]() {
+            auto* codec = GetAudioCodec();
+            int volume = codec->output_volume() - 10;
+            codec->SetOutputVolume(volume < 0 ? 0 : volume);
+        });
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
@@ -140,11 +154,23 @@ private:
 
 public:
     CompactWifiBoardLCD() :
-        boot_button_(BOOT_BUTTON_GPIO) {
+        boot_button_(BOOT_BUTTON_GPIO),
+        volume_up_button_(VOLUME_UP_BUTTON_GPIO),
+        volume_down_button_(VOLUME_DOWN_BUTTON_GPIO) {
+        // V1.2.1 expansion board power hold: active low on GPIO9.
+        gpio_config_t power_gpio = {};
+        power_gpio.pin_bit_mask = 1ULL << BOARD_POWER_OFF_PIN;
+        power_gpio.mode = GPIO_MODE_OUTPUT;
+        power_gpio.pull_up_en = GPIO_PULLUP_DISABLE;
+        power_gpio.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        power_gpio.intr_type = GPIO_INTR_DISABLE;
+        ESP_ERROR_CHECK(gpio_config(&power_gpio));
+        ESP_ERROR_CHECK(gpio_set_level(BOARD_POWER_OFF_PIN, 0));
         InitializeSpi();
         InitializeLcdDisplay();
         InitializeButtons();
         InitializeTools();
+        WgCwKeyMonitor::Start(CW_KEY_GPIO);
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();
         }
