@@ -289,6 +289,15 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
 }
 
 LcdDisplay::~LcdDisplay() {
+#ifdef WG_CW_BIG_FACES_ENABLED
+    {
+        DisplayLockGuard lock(this);
+        if (wg_cw_animation_ != nullptr) {
+            lv_timer_delete(wg_cw_animation_);
+            wg_cw_animation_ = nullptr;
+        }
+    }
+#endif
     SetPreviewImage(nullptr);
     
     // Clean up GIF controller
@@ -852,9 +861,19 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
 
 #ifdef WG_CW_BIG_FACES_ENABLED
-    lv_obj_set_size(emoji_box_, WgCwFaces::kFaceSize, WgCwFaces::kFaceSize);
+    // Leave four pixels of travel above and below the transparent sprite.
+    lv_obj_set_size(emoji_box_, WgCwFaces::kFaceWidth, WgCwFaces::kFaceHeight + 8);
     lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(emoji_box_, LV_SCROLLBAR_MODE_OFF);
+    wg_cw_animation_ = lv_timer_create([](lv_timer_t* timer) {
+        auto* self = static_cast<LcdDisplay*>(lv_timer_get_user_data(timer));
+        if (self->wg_cw_face_ == nullptr || !lv_obj_is_visible(self->emoji_image_)) {
+            return;
+        }
+        const auto animation = WgCwFaces::GetAnimation(self->wg_cw_face_);
+        self->wg_cw_frame_ = (self->wg_cw_frame_ + 1) % animation.count;
+        self->DrawWgCwFrame();
+    }, 2200, this);
     ShowWgCwFace(&WgCwFaces::idle);
 #endif
 
@@ -1018,6 +1037,12 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
         lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
         preview_image_cached_.reset();
+#ifdef WG_CW_BIG_FACES_ENABLED
+        if (wg_cw_animation_ != nullptr && wg_cw_face_ != nullptr) {
+            lv_timer_reset(wg_cw_animation_);
+            lv_timer_resume(wg_cw_animation_);
+        }
+#endif
         if (gif_controller_) {
             gif_controller_->Start();
         }
@@ -1033,6 +1058,11 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     }
 
     // Hide emoji_box_
+#ifdef WG_CW_BIG_FACES_ENABLED
+    if (wg_cw_animation_ != nullptr) {
+        lv_timer_pause(wg_cw_animation_);
+    }
+#endif
     if (gif_controller_) {
         gif_controller_->Stop();
     }
@@ -1087,19 +1117,19 @@ void LcdDisplay::ClearChatMessages() {
 const lv_image_dsc_t* LcdDisplay::GetWgCwNeutralFace() const {
     switch (Application::GetInstance().GetDeviceState()) {
         case kDeviceStateConnecting:
-            return &WgCwFaces::thinking;
+            return &WgCwFaces::connecting;
         case kDeviceStateListening:
             return &WgCwFaces::listening;
         case kDeviceStateSpeaking:
             return &WgCwFaces::speaking;
         case kDeviceStateWifiConfiguring:
-            return &WgCwFaces::disconnected;
+            return &WgCwFaces::network;
         default:
-            if (wg_cw_wifi_seen_ && !wg_cw_wifi_connected_) {
-                return &WgCwFaces::disconnected;
+            if (wg_cw_wifi_seen_ &&
+                (!wg_cw_wifi_connected_ || esp_timer_get_time() < wg_cw_connected_until_us_)) {
+                return &WgCwFaces::network;
             }
-            return esp_timer_get_time() < wg_cw_connected_until_us_
-                ? &WgCwFaces::connected : &WgCwFaces::idle;
+            return &WgCwFaces::idle;
     }
 }
 
@@ -1107,12 +1137,43 @@ void LcdDisplay::ShowWgCwFace(const lv_image_dsc_t* face) {
     if (gif_controller_) {
         gif_controller_->Stop();
     }
-    if (lv_image_get_src(emoji_image_) != face) {
-        lv_image_set_src(emoji_image_, face);
+    if (wg_cw_face_ != face) {
+        wg_cw_face_ = face;
+        wg_cw_frame_ = 0;
+        DrawWgCwFrame();
+        if (wg_cw_animation_ != nullptr &&
+            !lv_obj_has_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_timer_reset(wg_cw_animation_);
+            lv_timer_resume(wg_cw_animation_);
+        }
     }
     gif_controller_.reset();
     lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void LcdDisplay::DrawWgCwFrame() {
+    const auto animation = WgCwFaces::GetAnimation(wg_cw_face_);
+    const auto& step = animation.steps[wg_cw_frame_];
+    const auto* image = step.image != nullptr ? step.image : wg_cw_face_;
+    if (lv_image_get_src(emoji_image_) != image) {
+        lv_image_set_src(emoji_image_, image);
+    }
+    lv_obj_align(emoji_image_, LV_ALIGN_CENTER, 0, step.y);
+    if (wg_cw_animation_ != nullptr) {
+        lv_timer_set_period(wg_cw_animation_, step.duration_ms);
+    }
+}
+
+void LcdDisplay::StopWgCwAnimation() {
+    if (wg_cw_face_ == nullptr) {
+        return;
+    }
+    wg_cw_face_ = nullptr;
+    if (wg_cw_animation_ != nullptr) {
+        lv_timer_pause(wg_cw_animation_);
+    }
+    lv_obj_center(emoji_image_);
 }
 
 void LcdDisplay::SetStatus(const char* status) {
@@ -1150,10 +1211,9 @@ void LcdDisplay::UpdateStatusBar(bool update_all) {
         state != kDeviceStateUnknown) {
         return;
     }
-    const auto* current = lv_image_get_src(emoji_image_);
+    const auto* current = wg_cw_face_;
     if (!lv_obj_has_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN) &&
-        (current == &WgCwFaces::idle || current == &WgCwFaces::connected ||
-         current == &WgCwFaces::disconnected)) {
+        (current == &WgCwFaces::idle || current == &WgCwFaces::network)) {
         const auto* next = GetWgCwNeutralFace();
         if (current != next) {
             ShowWgCwFace(next);
@@ -1197,6 +1257,9 @@ void LcdDisplay::SetEmotion(const char* emotion) {
         const char* utf8 = font_awesome_get_utf8(emotion);
         if (utf8 != nullptr && emoji_label_ != nullptr) {
             DisplayLockGuard lock(this);
+#ifdef WG_CW_BIG_FACES_ENABLED
+            StopWgCwAnimation();
+#endif
             if (gif_controller_) {
                 gif_controller_->Stop();
                 gif_controller_.reset();
@@ -1209,6 +1272,9 @@ void LcdDisplay::SetEmotion(const char* emotion) {
     }
 
     DisplayLockGuard lock(this);
+#ifdef WG_CW_BIG_FACES_ENABLED
+    StopWgCwAnimation();
+#endif
     // Stop any running GIF animation in the same lock scope as setting new image
     // to prevent LVGL from accessing freed image data between operations
     if (gif_controller_) {

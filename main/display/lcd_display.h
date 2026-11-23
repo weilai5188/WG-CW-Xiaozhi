@@ -47,9 +47,15 @@ protected:
     bool wg_cw_wifi_connected_ = false;
     int64_t wg_cw_connected_until_us_ = 0;
 
-    // These helpers run with the display lock held.
+    lv_timer_t* wg_cw_animation_ = nullptr;
+    const lv_image_dsc_t* wg_cw_face_ = nullptr;
+    uint8_t wg_cw_frame_ = 0;
+
+    // Called under the display lock or by the LVGL timer itself.
     const lv_image_dsc_t* GetWgCwNeutralFace() const;
     void ShowWgCwFace(const lv_image_dsc_t* face);
+    void DrawWgCwFrame();
+    void StopWgCwAnimation();
 #endif
 
     void InitializeLcdThemes();
