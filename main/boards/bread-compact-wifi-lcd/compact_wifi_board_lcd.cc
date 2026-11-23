@@ -5,6 +5,7 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
+#include "cw_mode_controller.h"
 #include "mcp_server.h"
 #include "lamp_controller.h"
 #include "led/single_led.h"
@@ -63,6 +64,7 @@ class CompactWifiBoardLCD : public WifiBoard {
 private:
  
     Button boot_button_;
+    WgCwModeController cw_mode_;
     LcdDisplay* display_;
 
     void InitializeSpi() {
@@ -124,6 +126,7 @@ private:
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
+            if (cw_mode_.IsCwMode()) return;
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
@@ -145,6 +148,7 @@ public:
         InitializeLcdDisplay();
         InitializeButtons();
         InitializeTools();
+        cw_mode_.Start();
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();
         }
