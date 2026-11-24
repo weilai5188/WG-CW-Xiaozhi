@@ -1,0 +1,8 @@
+{
+  "original_sha256": "4d7e359380a180cc2024ce2d782fe7f8fb59dc4395c172d086ad351eeec36aab",
+  "patched_sha256": "4e83833cbdef9b6ae37fc129997141a3ada26c868e1ef68afbf6c349676b6976",
+  "assets": {
+    "wg_cw_live_ui.h": "2b40a7af84f880f81afa2cbe5fb94896bc199433f8ebdaf39986bfe899c3e69e",
+    "wg_cw_decoder.h": "f1e98d55f0734fc323b9ce67ddb8612f369f5995816d2c8158d258e843650fad"
+  }
+}

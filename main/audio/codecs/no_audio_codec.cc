@@ -75,7 +75,7 @@ NoAudioCodecDuplex::NoAudioCodecDuplex(int input_sample_rate, int output_sample_
 }
 
 
-NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_ws, gpio_num_t mic_din) {
+NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_ws, gpio_num_t mic_din, int tx_dma_desc, int tx_dma_frames) {
     duplex_ = false;
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
@@ -84,8 +84,8 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
     i2s_chan_config_t chan_cfg = {
         .id = (i2s_port_t)0,
         .role = I2S_ROLE_MASTER,
-        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
-        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
+        .dma_desc_num = static_cast<uint32_t>(tx_dma_desc),
+        .dma_frame_num = static_cast<uint32_t>(tx_dma_frames),
         .auto_clear_after_cb = true,
         .auto_clear_before_cb = false,
         .intr_priority = 0,
@@ -134,6 +134,8 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
 
     // Create a new channel for MIC
     chan_cfg.id = (i2s_port_t)1;
+    chan_cfg.dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM;
+    chan_cfg.dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM;
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, nullptr, &rx_handle_));
     std_cfg.clk_cfg.sample_rate_hz = (uint32_t)input_sample_rate_;
     std_cfg.gpio_cfg.bclk = mic_sck;

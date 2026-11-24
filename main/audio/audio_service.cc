@@ -288,48 +288,63 @@ void AudioService::AudioInputTask() {
     ESP_LOGW(TAG, "Audio input task stopped");
 }
 
-void AudioService::SetWgCwTone(bool enabled) {
-    // WG_CW_ISOLATION_TONE_V1. Atomic state is observed by the output task.
-    wg_cw_tone_.store(enabled);
+void AudioService::SetWgCwAudioMode(bool enabled) {
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        wg_cw_tone_.store(false);
+        wg_cw_audio_mode_.store(enabled);
+        audio_playback_queue_.clear();
+    }
     audio_queue_cv_.notify_all();
 }
 
+void AudioService::SetWgCwTone(bool enabled) {
+    // No application scheduling, audio locks or I/O on the key path.
+    wg_cw_tone_.store(enabled);
+}
+
 void AudioService::AudioOutputTask() {
+    std::vector<int16_t> cw_samples;
+    float phase = 0.0f;
+    float envelope = 0.0f;
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-        // WG_CW_ISOLATION_TONE_V1: CW audio takes exclusive output thread ownership while pressed.
-        audio_queue_cv_.wait(lock, [this]() { return !audio_playback_queue_.empty() || service_stopped_ || wg_cw_tone_.load(); });
-        if (wg_cw_tone_.load()) {
-            // Keep normal AI decoder data from playing in CW mode.
+        audio_queue_cv_.wait(lock, [this]() { return !audio_playback_queue_.empty() || service_stopped_ || wg_cw_audio_mode_.load(); });
+        if (service_stopped_) break;
+        if (wg_cw_audio_mode_.load()) {
             audio_playback_queue_.clear();
+            audio_queue_cv_.notify_all();
             lock.unlock();
             if (!codec_->output_enabled()) {
                 esp_timer_stop(audio_power_timer_);
                 esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
                 codec_->EnableOutput(true);
             }
-            // Smooth single-sine, per-frame phase continuity; 600 Hz at codec output rate.
             const int sample_rate = codec_->output_sample_rate();
-            if (sample_rate > 0) {
-                const int n = sample_rate / 100; // 10ms PCM
-                std::vector<int16_t> samples(n);
-                constexpr float TWO_PI = 6.2831853071795864769f;
-                static float phase = 0.0f;
-                const float step = TWO_PI * 600.0f / sample_rate;
-                for (int i = 0; i < n; ++i) {
-                    samples[i] = static_cast<int16_t>(sinf(phase) * 5000.0f);
-                    phase += step;
-                    if (phase >= TWO_PI) phase -= TWO_PI;
-                }
-                // OutputData is blocking; release latency is up to one PCM block.
-                codec_->OutputData(samples);
-                last_output_time_ = std::chrono::steady_clock::now();
+            if (sample_rate <= 0) {
+                vTaskDelay(1);
+                continue;
             }
+            // Continuous 2 ms PCM blocks, including silence between elements.
+            // Reuse the buffer and smoothly gate the 600 Hz tone over 1 ms.
+            cw_samples.resize(sample_rate / 500);
+            constexpr float TWO_PI = 6.2831853071795864769f;
+            const float step = TWO_PI * 600.0f / sample_rate;
+            const float ramp = 1000.0f / sample_rate;
+            const bool pressed = wg_cw_tone_.load();
+            for (auto& sample : cw_samples) {
+                if (pressed) { envelope += ramp; if (envelope > 1.0f) envelope = 1.0f; }
+                else { envelope -= ramp; if (envelope < 0.0f) envelope = 0.0f; }
+                sample = static_cast<int16_t>(sinf(phase) * 5000.0f * envelope);
+                phase += step;
+                if (phase >= TWO_PI) phase -= TWO_PI;
+            }
+            codec_->OutputData(cw_samples);
+            last_output_time_ = std::chrono::steady_clock::now();
             continue;
         }
-        if (service_stopped_) {
-            break;
-        }
+        envelope = 0.0f;
+        phase = 0.0f;
 
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
@@ -722,7 +737,7 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     if (input_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->input_enabled()) {
         codec_->EnableInput(false);
     }
-    if (output_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->output_enabled()) {
+    if (!wg_cw_audio_mode_.load() && output_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->output_enabled()) {
         // Keep TX clock when duplex RX is active; otherwise RX may stall on some boards.
         if (!(codec_->duplex() && codec_->input_enabled())) {
             codec_->EnableOutput(false);

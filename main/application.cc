@@ -679,6 +679,7 @@ void Application::SetWgCwMode(bool enabled) {
         audio_service_.EnableVoiceProcessing(false);
         audio_service_.EnableWakeWordDetection(false);
         audio_service_.ResetDecoder();
+        audio_service_.SetWgCwAudioMode(true);
         while (audio_service_.PopPacketFromSendQueue()) {}
         if (protocol_) {
             auto state = GetDeviceState();
@@ -693,6 +694,7 @@ void Application::SetWgCwMode(bool enabled) {
         ESP_LOGI("WG_CW", "ISOLATION=ON wake=OFF voice=OFF tone=READY");
     } else {
         audio_service_.SetWgCwTone(false);
+        audio_service_.SetWgCwAudioMode(false);
         wg_cw_mode_.store(false);
         SetDeviceState(kDeviceStateIdle);
         audio_service_.EnableVoiceProcessing(false);

@@ -131,12 +131,14 @@ public:
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void PlaySound(const std::string_view& sound);
+    void SetWgCwAudioMode(bool enabled);
     void SetWgCwTone(bool enabled); // WG_CW_ISOLATION_TONE_V1
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
 
 private:
+    std::atomic<bool> wg_cw_audio_mode_{false};
     std::atomic<bool> wg_cw_tone_{false}; // WG_CW_ISOLATION_TONE_V1
     AudioCodec* codec_ = nullptr;
     AudioServiceCallbacks callbacks_;

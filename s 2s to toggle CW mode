@@ -1,0 +1,62 @@
+warning: in the working copy of 'main/boards/bread-compact-wifi-lcd/cw_mode_controller.h', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/main/boards/bread-compact-wifi-lcd/cw_mode_controller.h b/main/boards/bread-compact-wifi-lcd/cw_mode_controller.h[m
+[1mindex 51475e6..5c11661 100644[m
+[1m--- a/main/boards/bread-compact-wifi-lcd/cw_mode_controller.h[m
+[1m+++ b/main/boards/bread-compact-wifi-lcd/cw_mode_controller.h[m
+[36m@@ -1,7 +1,7 @@[m
+ #pragma once[m
+ [m
+ // WG-CW first hardware test for XiaoZhi v2.2.6 / bread-compact-wifi-lcd.[m
+[31m-// GPIO38+GPIO39 hold for 2 seconds: toggle AI/CW monitoring mode.[m
+[32m+[m[32m// GPIO39 hold 2 seconds: toggle AI/CW monitoring mode.[m
+ // GPIO17 to GND: CW straight key, active LOW, 30 ms debounce.[m
+ // This stage does not take over I2S/audio or modify the XiaoZhi voice pipeline.[m
+ [m
+[36m@@ -19,7 +19,7 @@[m [mpublic:[m
+ [m
+     void Start() {[m
+         gpio_config_t cfg = {};[m
+[31m-        cfg.pin_bit_mask = (1ULL << 17) | (1ULL << 38) | (1ULL << 39);[m
+[32m+[m[32m        cfg.pin_bit_mask = (1ULL << 17) | (1ULL << 39);[m
+         cfg.mode = GPIO_MODE_INPUT;[m
+         cfg.pull_up_en = GPIO_PULLUP_ENABLE;[m
+         cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;[m
+[36m@@ -28,7 +28,6 @@[m [mpublic:[m
+ [m
+         const int64_t now = esp_timer_get_time();[m
+         InitKey(cw_key_, GPIO_NUM_17, now);[m
+[31m-        InitKey(volume_up_, GPIO_NUM_38, now);[m
+         InitKey(volume_down_, GPIO_NUM_39, now);[m
+ [m
+         esp_timer_create_args_t args = {};[m
+[36m@@ -39,7 +38,7 @@[m [mpublic:[m
+         args.skip_unhandled_events = true;[m
+         ESP_ERROR_CHECK(esp_timer_create(&args, &timer_));[m
+         ESP_ERROR_CHECK(esp_timer_start_periodic(timer_, 10000)); // 10 ms[m
+[31m-        ESP_LOGI("WG_CW", "Ready: GPIO17 key, GPIO38+39 hold 2s to toggle mode");[m
+[32m+[m[32m        ESP_LOGI("WG_CW", "Ready: GPIO17 key, GPIO39 hold 2s to toggle mode");[m
+     }[m
+ [m
+ private:[m
+[36m@@ -55,7 +54,6 @@[m [mprivate:[m
+ [m
+     esp_timer_handle_t timer_ = nullptr;[m
+     Key cw_key_;[m
+[31m-    Key volume_up_;[m
+     Key volume_down_;[m
+     bool cw_mode_ = false;[m
+     bool combo_latched_ = false;[m
+[36m@@ -89,11 +87,10 @@[m [mprivate:[m
+     void Poll() {[m
+         const int64_t now = esp_timer_get_time();[m
+         const bool cw_changed = UpdateKey(cw_key_, now);[m
+[31m-        UpdateKey(volume_up_, now);[m
+         UpdateKey(volume_down_, now);[m
+ [m
+[31m-        const bool both = volume_up_.stable_pressed && volume_down_.stable_pressed;[m
+[31m-        if (!both) {[m
+[32m+[m[32m        const bool button_held = volume_down_.stable_pressed;[m
+[32m+[m[32m        if (!button_held) {[m
+             combo_started_us_ = 0;[m
+             combo_latched_ = false;[m
+         } else if (combo_started_us_ == 0) {[m

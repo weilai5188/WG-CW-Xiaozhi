@@ -1,0 +1,22 @@
+{
+  "main/application.h": {
+    "original_sha256": "9e902a660641c60bfd490bb11b7b21697502ccb133025bf4760c5a5d6907f2f7",
+    "patched_sha256": "3fb0d8e3b5f1dff9dc73b9b2ff0cf103306fa1277dc9d9fc77edad74341c9378"
+  },
+  "main/application.cc": {
+    "original_sha256": "075329c62db50e428537ecbae440bd98a1b1a8572cc3739b44db30cae2afde3a",
+    "patched_sha256": "0a9af97be776b2742f5cd0488812672deb13225bf55440947a24cd0b73a99067"
+  },
+  "main/audio/audio_service.h": {
+    "original_sha256": "00455b6335ae12f8a703bd49a687dc9d3f7307cdaf63fd98577821be0e0233e2",
+    "patched_sha256": "4a8b5097a4b3c4594390ec02d077d4a41f1ba921e23d1c8f54319f177d45a50d"
+  },
+  "main/audio/audio_service.cc": {
+    "original_sha256": "c6a5825e9095664afc8d533ceb70c6e2540b9721b1aad9550d81c7cbf394a53a",
+    "patched_sha256": "43c300f4732ff9c694e659a48e9d22d22b01efcf1ad1d974a7d39ac95a32c0b2"
+  },
+  "main/boards/bread-compact-wifi-lcd/cw_mode_controller.h": {
+    "original_sha256": "b48c53e91b64d9743c2ca3669c6e20f7a8dd9d4eba269d2c79bfd969a7842656",
+    "patched_sha256": "4d7e359380a180cc2024ce2d782fe7f8fb59dc4395c172d086ad351eeec36aab"
+  }
+}
