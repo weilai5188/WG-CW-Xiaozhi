@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic> // WG_CW_ISOLATION_TONE_V1
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -130,11 +131,13 @@ public:
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void PlaySound(const std::string_view& sound);
+    void SetWgCwTone(bool enabled); // WG_CW_ISOLATION_TONE_V1
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
 
 private:
+    std::atomic<bool> wg_cw_tone_{false}; // WG_CW_ISOLATION_TONE_V1
     AudioCodec* codec_ = nullptr;
     AudioServiceCallbacks callbacks_;
     std::unique_ptr<AudioProcessor> audio_processor_;

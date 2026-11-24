@@ -1,4 +1,5 @@
 #include "audio_service.h"
+#include <cmath> // WG_CW_ISOLATION_TONE_V1
 #include <esp_log.h>
 #include <cstring>
 
@@ -287,10 +288,45 @@ void AudioService::AudioInputTask() {
     ESP_LOGW(TAG, "Audio input task stopped");
 }
 
+void AudioService::SetWgCwTone(bool enabled) {
+    // WG_CW_ISOLATION_TONE_V1. Atomic state is observed by the output task.
+    wg_cw_tone_.store(enabled);
+    audio_queue_cv_.notify_all();
+}
+
 void AudioService::AudioOutputTask() {
     while (true) {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
-        audio_queue_cv_.wait(lock, [this]() { return !audio_playback_queue_.empty() || service_stopped_; });
+        // WG_CW_ISOLATION_TONE_V1: CW audio takes exclusive output thread ownership while pressed.
+        audio_queue_cv_.wait(lock, [this]() { return !audio_playback_queue_.empty() || service_stopped_ || wg_cw_tone_.load(); });
+        if (wg_cw_tone_.load()) {
+            // Keep normal AI decoder data from playing in CW mode.
+            audio_playback_queue_.clear();
+            lock.unlock();
+            if (!codec_->output_enabled()) {
+                esp_timer_stop(audio_power_timer_);
+                esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                codec_->EnableOutput(true);
+            }
+            // Smooth single-sine, per-frame phase continuity; 600 Hz at codec output rate.
+            const int sample_rate = codec_->output_sample_rate();
+            if (sample_rate > 0) {
+                const int n = sample_rate / 100; // 10ms PCM
+                std::vector<int16_t> samples(n);
+                constexpr float TWO_PI = 6.2831853071795864769f;
+                static float phase = 0.0f;
+                const float step = TWO_PI * 600.0f / sample_rate;
+                for (int i = 0; i < n; ++i) {
+                    samples[i] = static_cast<int16_t>(sinf(phase) * 5000.0f);
+                    phase += step;
+                    if (phase >= TWO_PI) phase -= TWO_PI;
+                }
+                // OutputData is blocking; release latency is up to one PCM block.
+                codec_->OutputData(samples);
+                last_output_time_ = std::chrono::steady_clock::now();
+            }
+            continue;
+        }
         if (service_stopped_) {
             break;
         }

@@ -55,6 +55,7 @@ Application::~Application() {
 }
 
 bool Application::SetDeviceState(DeviceState state) {
+    if (wg_cw_mode_.load() && (state == kDeviceStateListening || state == kDeviceStateSpeaking || state == kDeviceStateConnecting)) return false; // WG_CW_ISOLATION_TONE_V1
     return state_machine_.TransitionTo(state);
 }
 
@@ -219,6 +220,7 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                if (wg_cw_mode_.load()) continue; // WG_CW_ISOLATION_TONE_V1
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
                     break;
                 }
@@ -667,11 +669,49 @@ void Application::StartListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
 }
 
+// WG_CW_ISOLATION_TONE_V1 - mutually exclusive XiaoZhi / CW operation.
+void Application::SetWgCwMode(bool enabled) {
+    if (wg_cw_mode_.load() == enabled) return;
+    if (enabled) {
+        // Gate queued network/state callbacks before starting teardown.
+        wg_cw_mode_.store(true);
+        audio_service_.SetWgCwTone(false);
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        audio_service_.ResetDecoder();
+        while (audio_service_.PopPacketFromSendQueue()) {}
+        if (protocol_) {
+            auto state = GetDeviceState();
+            if (state == kDeviceStateListening) protocol_->SendStopListening();
+            if (state == kDeviceStateSpeaking) AbortSpeaking(kAbortReasonNone);
+            if (protocol_->IsAudioChannelOpened()) protocol_->CloseAudioChannel();
+        }
+        SetDeviceState(kDeviceStateIdle);
+        // Idle handler can re-arm wake word; explicitly turn it off last.
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        ESP_LOGI("WG_CW", "ISOLATION=ON wake=OFF voice=OFF tone=READY");
+    } else {
+        audio_service_.SetWgCwTone(false);
+        wg_cw_mode_.store(false);
+        SetDeviceState(kDeviceStateIdle);
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(true);
+        ESP_LOGI("WG_CW", "ISOLATION=OFF wake=ON XiaoZhi restored");
+    }
+}
+
+void Application::SetWgCwKey(bool pressed) {
+    if (!wg_cw_mode_.load()) pressed = false;
+    audio_service_.SetWgCwTone(pressed);
+}
+
 void Application::StopListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
 }
 
 void Application::HandleToggleChatEvent() {
+    if (wg_cw_mode_.load()) return; // WG_CW_ISOLATION_TONE_V1
     auto state = GetDeviceState();
     
     if (state == kDeviceStateActivating) {
@@ -711,6 +751,7 @@ void Application::HandleToggleChatEvent() {
 }
 
 void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+    if (wg_cw_mode_.load()) return; // WG_CW_ISOLATION_TONE_V1
     // Check state again in case it was changed during scheduling
     if (GetDeviceState() != kDeviceStateConnecting) {
         return;
@@ -726,6 +767,7 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 }
 
 void Application::HandleStartListeningEvent() {
+    if (wg_cw_mode_.load()) return; // WG_CW_ISOLATION_TONE_V1
     auto state = GetDeviceState();
     
     if (state == kDeviceStateActivating) {
@@ -774,6 +816,7 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+    if (wg_cw_mode_.load()) return; // WG_CW_ISOLATION_TONE_V1
     if (!protocol_) {
         return;
     }
@@ -820,6 +863,7 @@ void Application::HandleWakeWordDetectedEvent() {
 }
 
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
+    if (wg_cw_mode_.load()) return; // WG_CW_ISOLATION_TONE_V1
     // Check state again in case it was changed during scheduling
     if (GetDeviceState() != kDeviceStateConnecting) {
         return;
@@ -850,6 +894,7 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
 }
 
 void Application::HandleStateChangedEvent() {
+    // WG_CW_ISOLATION_TONE_V1: guard standby rearming below.
     DeviceState new_state = state_machine_.GetState();
     clock_ticks_ = 0;
 
@@ -865,7 +910,7 @@ void Application::HandleStateChangedEvent() {
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
+            audio_service_.EnableWakeWordDetection(!wg_cw_mode_.load()); // WG_CW_ISOLATION_TONE_V1
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);

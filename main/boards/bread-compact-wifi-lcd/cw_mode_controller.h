@@ -103,9 +103,7 @@ private:
             ESP_LOGI("WG_CW", "MODE=%s", entering_cw ? "CW" : "XIAOZHI");
             // Any UI/audio calls must be scheduled to XiaoZhi main task.
             Application::GetInstance().Schedule([entering_cw]() {
-                if (entering_cw) {
-                    Application::GetInstance().StopListening();
-                }
+                Application::GetInstance().SetWgCwMode(entering_cw); // WG_CW_ISOLATION_TONE_V1
                 Board::GetInstance().GetDisplay()->ShowNotification(
                     entering_cw ? "CW MODE" : "XIAOZHI MODE", 3000);
             });
@@ -113,9 +111,11 @@ private:
 
         if (!cw_mode_ || !cw_changed) return;
         if (cw_key_.stable_pressed) {
+            Application::GetInstance().Schedule([](){ Application::GetInstance().SetWgCwKey(true); }); // WG_CW_ISOLATION_TONE_V1
             cw_pressed_us_ = now;
             ESP_LOGI("WG_CW", "KEY DOWN t_us=%lld", static_cast<long long>(now));
         } else {
+            Application::GetInstance().Schedule([](){ Application::GetInstance().SetWgCwKey(false); }); // WG_CW_ISOLATION_TONE_V1
             const int64_t held_ms = cw_pressed_us_ ? (now - cw_pressed_us_) / 1000 : 0;
             ESP_LOGI("WG_CW", "KEY UP t_us=%lld duration_ms=%lld",
                 static_cast<long long>(now), static_cast<long long>(held_ms));

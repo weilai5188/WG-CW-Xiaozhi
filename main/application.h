@@ -8,6 +8,7 @@
 
 #include <string>
 #include <mutex>
+#include <atomic> // WG_CW_ISOLATION_TONE_V1
 #include <deque>
 #include <memory>
 
@@ -103,6 +104,11 @@ public:
      */
     void StopListening();
 
+    // WG CW: call on the XiaoZhi main task only; no changes to hardware pins.
+    void SetWgCwMode(bool enabled); // WG_CW_ISOLATION_TONE_V1
+    void SetWgCwKey(bool pressed);
+    bool IsWgCwMode() const { return wg_cw_mode_.load(); }
+
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
@@ -133,6 +139,7 @@ private:
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
+    std::atomic<bool> wg_cw_mode_{false}; // WG_CW_ISOLATION_TONE_V1
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
 
