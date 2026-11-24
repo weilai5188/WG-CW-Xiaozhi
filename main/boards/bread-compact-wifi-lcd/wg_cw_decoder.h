@@ -1,5 +1,5 @@
 #pragma once
-// WG_CW_LIVE_UI_V1. Simple straight-key Morse decoder; runs in existing 10-ms poll.
+// WG_CW_LIVE_UI_V2. Simple straight-key Morse decoder; runs in existing 10-ms poll.
 #include <cstdint>
 #include <string>
 #include "wg_cw_live_ui.h"
@@ -23,11 +23,11 @@ public:
         bool changed=false;
         if (!finalized_ && !current_.empty() && gap>=kCharacterGapMs) {
             const char c=Lookup(current_);
-            if (text_.size()>=30) text_.erase(0,1);
+            if (text_.size()>=64) text_.erase(0,1);
             text_ += c;
             if (!morse_.empty()) morse_ += ' ';
             morse_ += current_;
-            if (morse_.size()>28) morse_.erase(0,morse_.size()-28);
+            if (morse_.size()>96) morse_.erase(0,morse_.size()-96);
             current_.clear(); finalized_=true; changed=true;
         }
         if (finalized_ && !word_space_added_ && gap>=kWordGapMs && !text_.empty()) {
