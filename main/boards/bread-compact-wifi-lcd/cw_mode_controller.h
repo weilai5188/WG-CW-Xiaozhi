@@ -13,6 +13,7 @@
 #include "application.h"
 #include "board.h"
 #include "wg_cw_decoder.h" // WG_CW_LIVE_UI_V1
+#include "wg_cw_usb_bridge.h" // WG_CW_USB_LINK_V1
 
 class WgCwModeController {
 public:
@@ -38,7 +39,8 @@ public:
         args.name = "wg_cw_keys";
         args.skip_unhandled_events = true;
         ESP_ERROR_CHECK(esp_timer_create(&args, &timer_));
-        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_, 10000)); // 10 ms
+        ESP_ERROR_CHECK(esp_timer_start_periodic(timer_, 10000));
+        WgCwUsbBridge::Get().Start(); // WG_CW_USB_LINK_V1 // 10 ms
         ESP_LOGI("WG_CW", "Ready: GPIO17 key, GPIO39 hold 2s to toggle mode");
     }
 
@@ -108,6 +110,7 @@ private:
         } else if (!combo_latched_ && now - combo_started_us_ >= kComboHoldUs) {
             combo_latched_ = true;
             cw_mode_ = !cw_mode_;
+            WgCwUsbBridge::Get().Mode(cw_mode_); // WG_CW_USB_LINK_V1
             cw_pressed_us_ = 0;
             cw_decoder_.Reset(); // WG_CW_LIVE_UI_V1
             const bool entering_cw = cw_mode_;
@@ -127,6 +130,7 @@ private:
             Application::GetInstance().Schedule([](){ Application::GetInstance().SetWgCwKey(true); }); // WG_CW_ISOLATION_TONE_V1
             cw_pressed_us_ = now;
             cw_decoder_.Down(); // WG_CW_LIVE_UI_V1
+            WgCwUsbBridge::Get().Down(now); // WG_CW_USB_LINK_V1
             EmitCwSnapshot();
             ESP_LOGI("WG_CW", "KEY DOWN t_us=%lld", static_cast<long long>(now));
         } else {
@@ -136,6 +140,7 @@ private:
                 static_cast<long long>(now), static_cast<long long>(held_ms));
             cw_pressed_us_ = 0;
             cw_decoder_.Up(static_cast<uint32_t>(held_ms), now); // WG_CW_LIVE_UI_V1
+            WgCwUsbBridge::Get().Up(now, static_cast<unsigned>(held_ms)); // WG_CW_USB_LINK_V1
             EmitCwSnapshot();
         }
     }
