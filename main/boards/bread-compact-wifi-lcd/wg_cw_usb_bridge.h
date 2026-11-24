@@ -35,7 +35,7 @@ public:
         }
     }
 
-    void Mode(bool cw) { Send(Event{2, cw ? 1 : 0, 0, esp_timer_get_time()}); }
+    void Mode(bool cw) { Send(Event{2, static_cast<int8_t>(cw ? 1 : 0), 0, esp_timer_get_time()}); }
     void Down(int64_t now_us) { Send(Event{0, 0, 0, now_us}); }
     void Up(int64_t now_us, unsigned duration_ms) {
         Send(Event{1, 0, duration_ms, now_us});
