@@ -1,7 +1,7 @@
 #pragma once
 
 // WG-CW first hardware test for XiaoZhi v2.2.6 / bread-compact-wifi-lcd.
-// GPIO38+GPIO39 hold for 2 seconds: toggle AI/CW monitoring mode.
+// GPIO39 hold 2 seconds: toggle AI/CW monitoring mode.
 // GPIO17 to GND: CW straight key, active LOW, 30 ms debounce.
 // This stage does not take over I2S/audio or modify the XiaoZhi voice pipeline.
 
@@ -19,7 +19,7 @@ public:
 
     void Start() {
         gpio_config_t cfg = {};
-        cfg.pin_bit_mask = (1ULL << 17) | (1ULL << 38) | (1ULL << 39);
+        cfg.pin_bit_mask = (1ULL << 17) | (1ULL << 39);
         cfg.mode = GPIO_MODE_INPUT;
         cfg.pull_up_en = GPIO_PULLUP_ENABLE;
         cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -28,7 +28,6 @@ public:
 
         const int64_t now = esp_timer_get_time();
         InitKey(cw_key_, GPIO_NUM_17, now);
-        InitKey(volume_up_, GPIO_NUM_38, now);
         InitKey(volume_down_, GPIO_NUM_39, now);
 
         esp_timer_create_args_t args = {};
@@ -39,7 +38,7 @@ public:
         args.skip_unhandled_events = true;
         ESP_ERROR_CHECK(esp_timer_create(&args, &timer_));
         ESP_ERROR_CHECK(esp_timer_start_periodic(timer_, 10000)); // 10 ms
-        ESP_LOGI("WG_CW", "Ready: GPIO17 key, GPIO38+39 hold 2s to toggle mode");
+        ESP_LOGI("WG_CW", "Ready: GPIO17 key, GPIO39 hold 2s to toggle mode");
     }
 
 private:
@@ -55,7 +54,6 @@ private:
 
     esp_timer_handle_t timer_ = nullptr;
     Key cw_key_;
-    Key volume_up_;
     Key volume_down_;
     bool cw_mode_ = false;
     bool combo_latched_ = false;
@@ -89,11 +87,10 @@ private:
     void Poll() {
         const int64_t now = esp_timer_get_time();
         const bool cw_changed = UpdateKey(cw_key_, now);
-        UpdateKey(volume_up_, now);
         UpdateKey(volume_down_, now);
 
-        const bool both = volume_up_.stable_pressed && volume_down_.stable_pressed;
-        if (!both) {
+        const bool button_held = volume_down_.stable_pressed;
+        if (!button_held) {
             combo_started_us_ = 0;
             combo_latched_ = false;
         } else if (combo_started_us_ == 0) {
