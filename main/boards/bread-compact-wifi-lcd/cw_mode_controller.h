@@ -12,6 +12,7 @@
 #include <esp_timer.h>
 #include "application.h"
 #include "board.h"
+#include "wg_cw_decoder.h" // WG_CW_LIVE_UI_V1
 
 class WgCwModeController {
 public:
@@ -59,6 +60,15 @@ private:
     bool combo_latched_ = false;
     int64_t combo_started_us_ = 0;
     int64_t cw_pressed_us_ = 0;
+    WgCwDecoder cw_decoder_; // WG_CW_LIVE_UI_V1
+
+    void EmitCwSnapshot() {
+        const auto snapshot = cw_decoder_.Snapshot();
+        Application::GetInstance().Schedule([snapshot]() {
+            WgCwLiveUi::Refresh(snapshot);
+        });
+    }
+
 
     static void TimerThunk(void* ctx) {
         static_cast<WgCwModeController*>(ctx)->Poll();
@@ -99,6 +109,7 @@ private:
             combo_latched_ = true;
             cw_mode_ = !cw_mode_;
             cw_pressed_us_ = 0;
+            cw_decoder_.Reset(); // WG_CW_LIVE_UI_V1
             const bool entering_cw = cw_mode_;
             ESP_LOGI("WG_CW", "MODE=%s", entering_cw ? "CW" : "XIAOZHI");
             // Any UI/audio calls must be scheduled to XiaoZhi main task.
@@ -106,13 +117,17 @@ private:
                 Application::GetInstance().SetWgCwMode(entering_cw); // WG_CW_ISOLATION_TONE_V1
                 Board::GetInstance().GetDisplay()->ShowNotification(
                     entering_cw ? "CW MODE" : "XIAOZHI MODE", 3000);
+                WgCwLiveUi::SetEnabled(entering_cw); // WG_CW_LIVE_UI_V1
             });
         }
 
+        if (cw_mode_ && cw_decoder_.Tick(now)) EmitCwSnapshot(); // WG_CW_LIVE_UI_V1
         if (!cw_mode_ || !cw_changed) return;
         if (cw_key_.stable_pressed) {
             Application::GetInstance().Schedule([](){ Application::GetInstance().SetWgCwKey(true); }); // WG_CW_ISOLATION_TONE_V1
             cw_pressed_us_ = now;
+            cw_decoder_.Down(); // WG_CW_LIVE_UI_V1
+            EmitCwSnapshot();
             ESP_LOGI("WG_CW", "KEY DOWN t_us=%lld", static_cast<long long>(now));
         } else {
             Application::GetInstance().Schedule([](){ Application::GetInstance().SetWgCwKey(false); }); // WG_CW_ISOLATION_TONE_V1
@@ -120,6 +135,8 @@ private:
             ESP_LOGI("WG_CW", "KEY UP t_us=%lld duration_ms=%lld",
                 static_cast<long long>(now), static_cast<long long>(held_ms));
             cw_pressed_us_ = 0;
+            cw_decoder_.Up(static_cast<uint32_t>(held_ms), now); // WG_CW_LIVE_UI_V1
+            EmitCwSnapshot();
         }
     }
 };
