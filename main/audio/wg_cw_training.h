@@ -7,6 +7,10 @@
 // Independent sample-clock receiver training engine. No GPIO or USB calls.
 class WgCwTraining {
 public:
+    // Listening compensation, not a calibrated speaker EQ. Unity at <=600 Hz.
+    static float ToneGain(int hz) {
+        return 1.0f + fminf(1.0f, fmaxf(0.0f, (hz - 600) / 600.0f));
+    }
     std::atomic<int> tone{600}, volume{100}, wpm{20};
     std::atomic<bool> active{false};
     std::atomic<unsigned> finished{0};
@@ -25,6 +29,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         if(!active.load()) return false;
         constexpr float pi2=6.28318530718f;
+        const float main_gain = ToneGain(tone.load());
         for(size_t i=0;i<n;i++) {
             if(!active.load()) {dst[i]=0;continue;}
             if(left_<=0) {
@@ -49,7 +54,7 @@ public:
             float fading=1-qsb_/100.0f*(0.5f+0.5f*sinf(time*1.9f));
             // Independent irregular keyed interfering carrier, not a second report.
             float other=(static_cast<int>(time*13)%11<5)?sinf(qphase_)*qrm_/100.0f:0;
-            dst[i]=static_cast<int16_t>((sinf(phase_)*env_*fading+noise*0.8f+other*0.65f)*5000.0f*volume.load()/100.0f);
+            dst[i]=static_cast<int16_t>((sinf(phase_)*env_*fading*main_gain+noise*0.8f+other*0.65f)*5000.0f*volume.load()/100.0f);
         }
         return true;
     }
