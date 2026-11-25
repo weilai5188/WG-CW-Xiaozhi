@@ -289,6 +289,7 @@ void AudioService::AudioInputTask() {
 }
 
 void AudioService::SetWgCwAudioMode(bool enabled) {
+    wg_training_.Stop();
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
         wg_cw_tone_.store(false);
@@ -329,13 +330,19 @@ void AudioService::AudioOutputTask() {
             // Reuse the buffer and smoothly gate the 600 Hz tone over 1 ms.
             cw_samples.resize(sample_rate / 500);
             constexpr float TWO_PI = 6.2831853071795864769f;
-            const float step = TWO_PI * 600.0f / sample_rate;
+            const float step = TWO_PI * wg_training_.tone.load() / sample_rate;
             const float ramp = 1000.0f / sample_rate;
             const bool pressed = wg_cw_tone_.load();
+            if (pressed) wg_training_.Stop();
+            if (!pressed && wg_training_.Render(cw_samples.data(), cw_samples.size(), sample_rate)) {
+                codec_->OutputData(cw_samples);
+                last_output_time_ = std::chrono::steady_clock::now();
+                continue;
+            }
             for (auto& sample : cw_samples) {
                 if (pressed) { envelope += ramp; if (envelope > 1.0f) envelope = 1.0f; }
                 else { envelope -= ramp; if (envelope < 0.0f) envelope = 0.0f; }
-                sample = static_cast<int16_t>(sinf(phase) * 5000.0f * envelope);
+                sample = static_cast<int16_t>(sinf(phase) * 5000.0f * envelope * wg_training_.volume.load() / 100.0f);
                 phase += step;
                 if (phase >= TWO_PI) phase -= TWO_PI;
             }

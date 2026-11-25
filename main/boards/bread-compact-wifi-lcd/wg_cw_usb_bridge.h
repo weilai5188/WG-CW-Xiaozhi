@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include "cJSON.h"
+#include "application.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -63,6 +66,37 @@ private:
             (void)usb_serial_jtag_write_bytes(line, length, pdMS_TO_TICKS(10));
         }
     }
+
+    std::string rx_;
+    bool discard_=false;
+    unsigned last_finished_=0;
+    void Command(const std::string& line) {
+        if(line.compare(0,6,"WGCMD:")!=0) return;
+        cJSON* j=cJSON_Parse(line.c_str()+6); if(!j)return;
+        auto str=[&](const char* k)->const char*{auto* v=cJSON_GetObjectItemCaseSensitive(j,k);return cJSON_IsString(v)?v->valuestring:"";};
+        auto num=[&](const char* k,int fallback,int lo,int hi){auto* v=cJSON_GetObjectItemCaseSensitive(j,k);int x=cJSON_IsNumber(v)?v->valueint:fallback;return x<lo?lo:x>hi?hi:x;};
+        auto& app=Application::GetInstance(); auto& tr=app.GetAudioService().WgTraining();
+        const char* type=str("type"); const char* state="rejected";
+        if(mode_cw_ && app.IsWgCwMode()) {
+            if(!strcmp(type,"config")||!strcmp(type,"play")) {
+                tr.tone.store(num("tone",tr.tone.load(),300,1200));tr.volume.store(num("volume",tr.volume.load(),0,100));tr.wpm.store(num("wpm",tr.wpm.load(),5,72));
+                if(!strcmp(type,"config")) state="configured";
+                else if(tr.Start(str("codes"),num("noise",0,0,100),num("qrm",0,0,100),num("qsb",0,0,100),num("drift",0,0,100))) state="playing";
+            } else if(!strcmp(type,"stop")) {tr.Stop();state="stopped";}
+        }
+        char reply[160]; snprintf(reply,sizeof(reply),"WGKEY:{\"type\":\"rx_status\",\"state\":\"%s\",\"id\":%d}\n",state,num("id",0,0,2147483647)); Write(reply);cJSON_Delete(j);
+    }
+    void ReadCommands() {
+        uint8_t bytes[128]; int n=usb_serial_jtag_read_bytes(bytes,sizeof(bytes),0);
+        for(int i=0;i<n;i++) {
+            char c=static_cast<char>(bytes[i]);
+            if(c=='\n') {if(!discard_)Command(rx_);rx_.clear();discard_=false;}
+            else if(c!='\r'&&!discard_) {if(rx_.size()<4096)rx_+=c;else {rx_.clear();discard_=true;}}
+        }
+        auto& tr=Application::GetInstance().GetAudioService().WgTraining();
+        unsigned f=tr.finished.load(); if(f!=last_finished_) {last_finished_=f;Write("WGKEY:{\"type\":\"rx_status\",\"state\":\"done\"}\n");}
+    }
+
     void Run() {
         usb_serial_jtag_driver_config_t cfg = {};
         cfg.rx_buffer_size = 256;
@@ -78,7 +112,7 @@ private:
         int64_t last_hello = 0;
         while (true) {
             Event e = {};
-            if (xQueueReceive(queue_, &e, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (xQueueReceive(queue_, &e, pdMS_TO_TICKS(10)) == pdTRUE) {
                 char line[192] = {};
                 if (e.kind == 2) {
                     mode_cw_ = (e.mode == 1);
@@ -100,10 +134,11 @@ private:
                 }
                 if (line[0]) Write(line);
             }
+            ReadCommands();
             const int64_t now = esp_timer_get_time();
             if (now - last_hello > 2000000LL) {
                 last_hello = now;
-                Write("WGKEY:{\"type\":\"hello\",\"device\":\"WG-CW-ESP32S3\",\"protocol\":1,\"transport\":\"usb\"}\n");
+                char hello[180]; snprintf(hello,sizeof(hello),"WGKEY:{\"type\":\"hello\",\"device\":\"WG-CW-ESP32S3\",\"protocol\":2,\"transport\":\"usb\",\"remote\":true,\"mode\":\"%s\"}\n",mode_cw_ ? "cw" : "xiaozhi"); Write(hello);
             }
         }
     }
