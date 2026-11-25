@@ -20,6 +20,8 @@ class WgCwModeController {
 public:
     bool IsCwMode() const { return cw_mode_; }
 
+    void RequestEnterCw() { enter_requested_.store(true); }
+
     void Start() {
         gpio_config_t cfg = {};
         cfg.pin_bit_mask = (1ULL << 17) | (1ULL << 39);
@@ -62,6 +64,7 @@ private:
     Key volume_down_;
     std::atomic<bool> cw_mode_{false};
     std::atomic<bool> cw_ready_{false};
+    std::atomic<bool> enter_requested_{false};
     bool combo_latched_ = false;
     int64_t combo_started_us_ = 0;
     int64_t cw_pressed_us_ = 0;
@@ -99,6 +102,24 @@ private:
         return false;
     }
 
+    void ChangeMode(bool entering_cw) {
+        cw_ready_.store(false);
+        cw_mode_.store(entering_cw);
+        Application::GetInstance().SetWgCwKey(false);
+        WgCwUsbBridge::Get().Mode(cw_mode_); // WG_CW_USB_LINK_V1
+        cw_pressed_us_ = 0;
+        cw_decoder_.Reset(); // WG_CW_LIVE_UI_V1
+        ESP_LOGI("WG_CW", "MODE=%s", entering_cw ? "CW" : "XIAOZHI");
+        // Mode transition and UI stay on XiaoZhi main task.
+        Application::GetInstance().Schedule([this, entering_cw]() {
+            Application::GetInstance().SetWgCwMode(entering_cw); // WG_CW_ISOLATION_TONE_V1
+            Board::GetInstance().GetDisplay()->ShowNotification(
+                entering_cw ? "CW MODE" : "XIAOZHI MODE", 3000);
+            WgCwLiveUi::SetEnabled(entering_cw); // WG_CW_LIVE_UI_V1
+            cw_ready_.store(entering_cw && cw_mode_.load());
+        });
+    }
+
     void Poll() {
         const int64_t now = esp_timer_get_time();
         const bool cw_changed = UpdateKey(cw_key_, now, kCwDebounceUs);
@@ -112,22 +133,11 @@ private:
             combo_started_us_ = now;
         } else if (!combo_latched_ && now - combo_started_us_ >= kComboHoldUs) {
             combo_latched_ = true;
-            cw_ready_.store(false);
-            cw_mode_.store(!cw_mode_.load());
-            Application::GetInstance().SetWgCwKey(false);
-            WgCwUsbBridge::Get().Mode(cw_mode_); // WG_CW_USB_LINK_V1
-            cw_pressed_us_ = 0;
-            cw_decoder_.Reset(); // WG_CW_LIVE_UI_V1
-            const bool entering_cw = cw_mode_;
-            ESP_LOGI("WG_CW", "MODE=%s", entering_cw ? "CW" : "XIAOZHI");
-            // Mode transition and UI stay on XiaoZhi main task.
-            Application::GetInstance().Schedule([this, entering_cw]() {
-                Application::GetInstance().SetWgCwMode(entering_cw); // WG_CW_ISOLATION_TONE_V1
-                Board::GetInstance().GetDisplay()->ShowNotification(
-                    entering_cw ? "CW MODE" : "XIAOZHI MODE", 3000);
-                WgCwLiveUi::SetEnabled(entering_cw); // WG_CW_LIVE_UI_V1
-                cw_ready_.store(entering_cw && cw_mode_.load());
-            });
+            ChangeMode(!cw_mode_.load());
+        }
+
+        if (enter_requested_.exchange(false) && !cw_mode_.load()) {
+            ChangeMode(true);
         }
 
         if (cw_mode_ && cw_decoder_.Tick(now)) EmitCwSnapshot(); // WG_CW_LIVE_UI_V1

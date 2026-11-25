@@ -139,6 +139,13 @@ private:
     // 物联网初始化，添加对 AI 可见设备
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
+        McpServer::GetInstance().AddTool(
+            "self.cw.enter_mode",
+            "Enter CW Morse code radio telegraph training mode when the user explicitly asks to enter CW or radio telegraph training (进入CW模式、切换到报务模式、打开报务训练机、练习发报). This switches away from AI chat; use only for explicit mode entry requests.",
+            PropertyList(), [this](const PropertyList&) -> ReturnValue {
+                cw_mode_.RequestEnterCw();
+                return true;
+            });
     }
 
 public:
